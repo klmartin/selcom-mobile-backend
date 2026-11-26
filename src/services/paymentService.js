@@ -77,7 +77,8 @@ class PaymentService {
       selcom_order_id: providerId(), selcom_transid: providerId(), idempotency_key: key,
       request_hash: sha256(JSON.stringify(normalized)), customer_name: normalized.customerName,
       customer_email: normalized.customerEmail, customer_phone: normalized.phone,
-      amount: normalized.amount.toFixed(2), currency: normalized.currency, description: normalized.description
+      amount: normalized.amount.toFixed(2), currency: normalized.currency, description: normalized.description,
+      callback_url: normalized.callbackUrl ?? null
     };
     const result = await this.repo.createOrGet(record);
     let payment = result.payment;
@@ -149,7 +150,7 @@ class PaymentService {
     }
     // The repository stores the event AND schedules a status check in one transaction.
     // Never trust unsigned amount/phone/channel fields, or mark paid from a callback alone.
-    await this.repo.storeWebhook({ paymentId: payment.id, key: verification.dedupeKey, payload, verified: true });
+    await this.repo.storeWebhook({ paymentId: payment.id, key: verification.dedupeKey, payload, verified: true, forward: Boolean(payment.callback_url) });
     return { result: 'SUCCESS', resultcode: '000', message: 'Accepted' };
   }
 }

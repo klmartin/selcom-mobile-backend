@@ -165,6 +165,26 @@ All routes except health and the separately authenticated callback require `X-AP
 
 The event and its scheduled status check are committed together. Callbacks are deduplicated independently of delivery timestamp, acknowledged quickly, and verified through the worker. Their unsigned amount/phone/channel fields cannot independently mark a payment paid. Full callback bodies contain payment/customer information; restrict database access and apply an appropriate retention policy. General logs and attempt logs redact credentials and customer details.
 
+To see whether a callback passed authentication, query the most recent events in MySQL:
+
+```sql
+SELECT w.received_at, p.payment_id, w.verification_status, w.processing_status,
+       w.error_message, w.delivery_attempts, w.delivery_http_status, w.delivered_at
+FROM webhook_events AS w
+LEFT JOIN payments AS p ON p.id = w.payment_id
+ORDER BY w.id DESC LIMIT 20;
+```
+
+`verification_status = 'valid'` confirms the signature and payment identifiers matched. For a 401, `error_message` gives the rejection reason. A valid provider notification triggers a separate Selcom status query to confirm payment.
+
+### Forward Selcom callbacks to your application
+
+Run `npm run migrate`, set `CALLBACK_ALLOWED_ORIGINS` to a comma-separated list of HTTPS origins you control (for example `https://merchant.your-domain.com`), and set `CALLBACK_SIGNING_SECRET` to a random secret of at least 32 characters shared with the receiving application. Restart the service. Add an optional `callbackUrl` to the `POST /api/v1/payments/mobile` body, for example `"callbackUrl": "https://merchant.your-domain.com/webhooks/payments"`. The URL is part of the idempotent request and is saved when you first create the payment.
+
+For a verified Selcom callback, the service queues an HTTPS POST with `eventId`, `event` (`selcom.callback`), `paymentId`, `merchantReference`, and `callback`. The `callback` object contains the authenticated Selcom fields `transid`, `order_id`, `reference`, `result`, `resultcode`, and `payment_status`. For confirmed payment state, read `GET /api/v1/payments/:paymentId`.
+
+Verify `X-Callback-Signature` against `sha256=` followed by the hex HMAC-SHA256 of the exact raw request body using `CALLBACK_SIGNING_SECRET`. Compare the signatures in constant time. Deduplicate using `eventId` and return a 2xx after accepting the event. The worker retries unsuccessful deliveries up to five total attempts and records the last HTTP status and successful delivery time. Redirects are disabled.
+
 The worker only queries status. It never recreates orders or resends collections. A crash during dispatch leaves an uncertain stage to reconcile/review. If order creation was definitively saved but the prompt was never dispatched, replaying the same original request can claim that remaining step once.
 
 SQL claims prevent simultaneous workers from checking the same payment. Claims expire after the HTTP deadline plus a buffer. Queries stop at the configured maximum attempts; unresolved rows stay available for review. All timestamps are stored in UTC and API dates include `Z`.

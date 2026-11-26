@@ -9,7 +9,7 @@ function bootstrap(config) {
   const repository = new PaymentRepository(pool, config);
   const selcom = new SelcomService(config);
   const service = new PaymentService(repository, selcom, config);
-  return { pool, service };
+  return { pool, service, repository };
 }
 
 module.exports = { bootstrap };

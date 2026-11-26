@@ -49,12 +49,21 @@ function loadConfig(env = process.env, { databaseOnly = false } = {}) {
   };
   const appApiKey = required('APP_API_KEY');
   if (appApiKey.length < 32) throw new Error('APP_API_KEY must contain at least 32 characters; run npm run setup.');
+  const callbackOrigins = text('CALLBACK_ALLOWED_ORIGINS').split(',').map(value => value.trim()).filter(Boolean);
+  for (const origin of callbackOrigins) {
+    let url;
+    try { url = new URL(origin); } catch { throw new Error('CALLBACK_ALLOWED_ORIGINS must contain HTTPS origins.'); }
+    if (url.protocol !== 'https:' || url.origin !== origin) throw new Error('CALLBACK_ALLOWED_ORIGINS must contain HTTPS origins without paths.');
+  }
+  const callbackSigningSecret = callbackOrigins.length ? required('CALLBACK_SIGNING_SECRET') : null;
+  if (callbackSigningSecret && callbackSigningSecret.length < 32) throw new Error('CALLBACK_SIGNING_SECRET must contain at least 32 characters.');
   Object.assign(config, {
     host: text('HOST', '127.0.0.1'), port: integer('PORT', 3080, 1, 65535), appApiKey,
     trustProxyHops: integer('TRUST_PROXY_HOPS', 0, 0, 2),
     selcomBaseUrl: httpsUrl('SELCOM_BASE_URL'),
     selcomApiKey: required('SELCOM_API_KEY'), selcomApiSecret: required('SELCOM_API_SECRET'),
     selcomVendor: required('SELCOM_VENDOR'), publicWebhookUrl: httpsUrl('PUBLIC_WEBHOOK_URL'),
+    callbackOrigins, callbackSigningSecret,
     selcomTimeoutMs: integer('SELCOM_TIMEOUT_MS', 20000, 1000, 60000),
     paymentMin: integer('PAYMENT_MIN_AMOUNT', 100, 1, 1000000000),
     paymentMax: integer('PAYMENT_MAX_AMOUNT', 10000000, 1, 1000000000),

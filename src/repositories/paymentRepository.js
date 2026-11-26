@@ -30,11 +30,11 @@ class PaymentRepository {
   }
 
   async createOrGet(record) {
-    const keys = ['payment_id', 'merchant_reference', 'selcom_order_id', 'selcom_transid', 'idempotency_key', 'request_hash', 'customer_name', 'customer_email', 'customer_phone', 'amount', 'currency', 'description'];
+    const keys = ['payment_id', 'merchant_reference', 'selcom_order_id', 'selcom_transid', 'idempotency_key', 'request_hash', 'customer_name', 'customer_email', 'customer_phone', 'amount', 'currency', 'description', 'callback_url'];
     try {
       const [result] = await this.pool.execute(
         `INSERT INTO payments (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`,
-        keys.map(k => record[k])
+        keys.map(k => k === 'callback_url' ? record[k] ?? null : record[k])
       );
       return { payment: await this.getById(result.insertId), created: true };
     } catch (error) {
@@ -155,16 +155,17 @@ class PaymentRepository {
     );
   }
 
-  async storeWebhook({ paymentId = null, key, payload, verified, error = null }) {
+  async storeWebhook({ paymentId = null, key, payload, verified, error = null, forward = false }) {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
       // Lock the parent first to avoid FK shared-lock upgrades racing other callbacks.
       if (paymentId !== null) await connection.execute('SELECT id FROM payments WHERE id=? FOR UPDATE', [paymentId]);
       const [result] = await connection.execute(
-        `INSERT INTO webhook_events (payment_id,dedupe_key,payload,verification_status,processing_status,error_message)
-         VALUES (?,?,?,?,?,?)`,
-        [paymentId, key, JSON.stringify(payload ?? null), verified ? 'valid' : 'invalid', verified ? 'queued' : 'rejected', error]
+        `INSERT INTO webhook_events (payment_id,dedupe_key,payload,verification_status,processing_status,error_message,delivery_due_at)
+         VALUES (?,?,?,?,?,?,?)`,
+        [paymentId, key, JSON.stringify(payload ?? null), verified ? 'valid' : 'invalid', verified ? 'queued' : 'rejected', error,
+          verified && forward ? sqlDate(this.clock()) : null]
       );
       if (verified && paymentId !== null) {
         await connection.execute(
@@ -186,6 +187,39 @@ class PaymentRepository {
       if (error.code === 'ER_DUP_ENTRY') return { id: null, created: false };
       throw error;
     } finally { connection.release(); }
+  }
+
+  async claimDelivery(maxAttempts) {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [rows] = await connection.execute(
+        `SELECT id, payment_id, dedupe_key, payload, delivery_attempts FROM webhook_events
+         WHERE delivery_due_at <= ? AND delivery_attempts < ? ORDER BY delivery_due_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+        [sqlDate(this.clock()), maxAttempts]
+      );
+      const event = rows[0];
+      if (event) {
+        event.delivery_token = randomUUID();
+        event.delivery_attempts++;
+        await connection.execute(
+          'UPDATE webhook_events SET delivery_attempts=?, delivery_token=?, delivery_due_at=?, delivery_http_status=NULL WHERE id=?',
+          [event.delivery_attempts, event.delivery_token, sqlDate(this.clock() + 30000), event.id]
+        );
+      }
+      await connection.commit();
+      return event || null;
+    } catch (error) { await connection.rollback(); throw error; }
+    finally { connection.release(); }
+  }
+
+  async completeDelivery(event, { status, delivered, retryDelay }) {
+    const now = this.clock();
+    await this.pool.execute(
+      `UPDATE webhook_events SET delivery_token=NULL, delivery_due_at=?, delivery_http_status=?, delivered_at=?
+       WHERE id=? AND delivery_token=?`,
+      [retryDelay ? sqlDate(now + retryDelay) : null, status, delivered ? sqlDate(now) : null, event.id, event.delivery_token]
+    );
   }
 }
 

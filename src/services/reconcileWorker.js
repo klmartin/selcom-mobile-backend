@@ -1,17 +1,17 @@
 'use strict';
 
-function startWorker(service, config, logger = console) {
+function startWorker(run, interval, errorEvent, logger = console) {
   let running = false;
   let stopped = false;
   let inFlight = Promise.resolve();
   const tick = () => {
     if (running || stopped) return;
     running = true;
-    inFlight = service.reconcileBatch({ shouldStop: () => stopped })
-      .catch(error => logger.error(JSON.stringify({ event: 'reconciliation_error', code: error.code || 'RECONCILE_ERROR' })))
+    inFlight = run({ shouldStop: () => stopped })
+      .catch(error => logger.error(JSON.stringify({ event: errorEvent, code: error.code || 'WORKER_ERROR' })))
       .finally(() => { running = false; });
   };
-  const timer = setInterval(tick, config.reconcilePollMs);
+  const timer = setInterval(tick, interval);
   timer.unref();
   tick();
   return { stop: async () => { stopped = true; clearInterval(timer); await inFlight; } };

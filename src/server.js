@@ -4,14 +4,15 @@ const { loadConfig } = require('./config');
 const { bootstrap } = require('./bootstrap');
 const { createApp } = require('./app');
 const { startWorker } = require('./services/reconcileWorker');
+const { deliverCallback } = require('./services/callbackDelivery');
 
 async function main() {
   const config = loadConfig();
-  const { pool, service } = bootstrap(config);
+  const { pool, service, repository } = bootstrap(config);
   try {
-    await pool.query('SELECT id FROM payments LIMIT 0');
+    await pool.query('SELECT callback_url FROM payments LIMIT 0');
     await pool.query('SELECT id FROM payment_attempts LIMIT 0');
-    await pool.query('SELECT id FROM webhook_events LIMIT 0');
+    await pool.query('SELECT delivery_due_at FROM webhook_events LIMIT 0');
   } catch (error) { await pool.end(); throw error; }
   const app = createApp({ service, config });
   const server = app.listen(config.port, config.host, () => {
@@ -19,7 +20,13 @@ async function main() {
   });
   server.headersTimeout = 15000;
   server.requestTimeout = 30000;
-  const worker = config.reconcileEnabled ? startWorker(service, config) : null;
+  const workers = [];
+  if (config.reconcileEnabled) {
+    workers.push(startWorker(options => service.reconcileBatch(options), config.reconcilePollMs, 'reconciliation_error'));
+  }
+  if (config.callbackOrigins.length) {
+    workers.push(startWorker(() => deliverCallback(repository, config), 1000, 'callback_delivery_error'));
+  }
   let stopping = false;
   const shutdown = async () => {
     if (stopping) return;
@@ -28,7 +35,7 @@ async function main() {
     const deadline = setTimeout(() => process.exit(1), 60000);
     deadline.unref();
     const closed = new Promise(resolve => server.close(resolve));
-    if (worker) await worker.stop();
+    await Promise.all(workers.map(worker => worker.stop()));
     await closed;
     await pool.end();
     clearTimeout(deadline);

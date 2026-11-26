@@ -20,14 +20,25 @@ function parsePayment(input, config) {
     currency: z.literal('TZS').default('TZS'),
     customerName: z.string().trim().min(1).max(150).regex(/^[^\x00-\x1f]+$/),
     customerEmail: z.string().trim().email().max(254),
-    description: z.string().trim().max(250).regex(/^[^\x00-\x1f]*$/).default('')
+    description: z.string().trim().max(250).regex(/^[^\x00-\x1f]*$/).default(''),
+    callbackUrl: z.string().trim().max(2048).optional()
   }).strict();
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
     const fields = [...new Set(parsed.error.issues.map(x => x.path.join('.') || 'body'))];
     throw new AppError(400, 'INVALID_REQUEST', `Check the following fields: ${fields.join(', ')}.`);
   }
-  return { ...parsed.data, phone: normalizePhone(parsed.data.phone) };
+  const payment = { ...parsed.data, phone: normalizePhone(parsed.data.phone) };
+  if (payment.callbackUrl !== undefined) {
+    let url;
+    try { url = new URL(payment.callbackUrl); } catch { throw new AppError(400, 'INVALID_CALLBACK_URL', 'Use an approved HTTPS callback URL.'); }
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.href.length > 2048 ||
+        !config.callbackOrigins?.includes(url.origin)) {
+      throw new AppError(400, 'INVALID_CALLBACK_URL', 'Use an approved HTTPS callback URL without credentials or a fragment.');
+    }
+    payment.callbackUrl = url.href;
+  }
+  return payment;
 }
 
 function parseIdempotencyKey(value) {
