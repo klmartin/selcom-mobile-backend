@@ -45,7 +45,7 @@ For a remote database, ask its administrator to create the equivalent user restr
 | Setting | Value to supply |
 | --- | --- |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Your dedicated database connection |
-| `SELCOM_BASE_URL` | The HTTPS API base URL provided for your Selcom account; omit `/v1/checkout` |
+| `SELCOM_BASE_URL` | Your Selcom HTTPS API gateway base URL, for example `https://apigw.selcommobile.com/v1`. The app adds `/v1` when omitted. |
 | `SELCOM_API_KEY`, `SELCOM_API_SECRET` | Your Selcom credentials |
 | `SELCOM_VENDOR` | Your assigned merchant/vendor identifier |
 | `PUBLIC_WEBHOOK_URL` | Your public HTTPS URL ending in `/api/v1/webhooks/selcom` |

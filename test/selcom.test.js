@@ -9,6 +9,27 @@ const { amountCents } = require('../src/utils/validation');
 const { queryOutcome } = require('../src/services/paymentService');
 
 describe('Official client signing and bounded HTTP adapter', () => {
+  it('resolves all checkout endpoints with one API version segment', async () => {
+    for (const selcomBaseUrl of ['https://selcom.test', 'https://selcom.test/v1', 'https://selcom.test/gateway/v1/']) {
+      const client = new SelcomService({ ...testConfig(), selcomBaseUrl });
+      const urls = [];
+      client.http.defaults.adapter = async options => {
+        urls.push(client.http.getUri(options));
+        return { status: 200, data: '{}' };
+      };
+      const payment = { selcom_order_id: 'order', selcom_transid: 'transaction', customer_phone: '255712345678', amount: '1000.00' };
+      await client.createCheckoutOrder(payment);
+      await client.initiateWalletPayment(payment);
+      await client.getOrderStatus(payment);
+      const prefix = selcomBaseUrl.includes('/gateway') ? '/gateway' : '';
+      assert.deepEqual(urls, [
+        `https://selcom.test${prefix}/v1/checkout/create-order-minimal`,
+        `https://selcom.test${prefix}/v1/checkout/wallet-payment`,
+        `https://selcom.test${prefix}/v1/checkout/order-status?order_id=order`
+      ]);
+    }
+  });
+
   it('uses the real installed export and signs the actual request fields in order', async () => {
     const config = testConfig(); let captured;
     const client = new SelcomService(config, { http: { request: async options => {

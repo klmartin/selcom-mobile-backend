@@ -13,9 +13,11 @@ class SelcomService {
     // The published 1.0.0 package exports apigwCLient, unlike its README.
     const Constructor = sdk.apigwCLient || sdk.apigwClient;
     if (typeof Constructor !== 'function') throw new Error('Unsupported selcom-apigw-client export.');
-    this.signer = new Constructor(config.selcomBaseUrl, config.selcomApiKey, config.selcomApiSecret);
+    const gatewayUrl = config.selcomBaseUrl.replace(/\/+$/, '');
+    const baseURL = gatewayUrl.endsWith('/v1') ? gatewayUrl : `${gatewayUrl}/v1`;
+    this.signer = new Constructor(baseURL, config.selcomApiKey, config.selcomApiSecret);
     this.http = http || axios.create({
-      baseURL: config.selcomBaseUrl,
+      baseURL,
       timeout: config.selcomTimeoutMs,
       maxRedirects: 0, maxContentLength: 65536, maxBodyLength: 65536,
       validateStatus: () => true,
@@ -70,9 +72,9 @@ class SelcomService {
     }
   }
 
-  createCheckoutOrder(payment) { return this.request('POST', '/v1/checkout/create-order-minimal', this.orderPayload(payment)); }
-  initiateWalletPayment(payment) { return this.request('POST', '/v1/checkout/wallet-payment', this.walletPayload(payment)); }
-  getOrderStatus(payment) { return this.request('GET', '/v1/checkout/order-status', { order_id: payment.selcom_order_id }); }
+  createCheckoutOrder(payment) { return this.request('POST', '/checkout/create-order-minimal', this.orderPayload(payment)); }
+  initiateWalletPayment(payment) { return this.request('POST', '/checkout/wallet-payment', this.walletPayload(payment)); }
+  getOrderStatus(payment) { return this.request('GET', '/checkout/order-status', { order_id: payment.selcom_order_id }); }
 
   verifyWebhook(headers, payload) {
     const fail = reason => ({ valid: false, reason, dedupeKey: sha256('invalid:' + JSON.stringify(payload ?? null)) });
