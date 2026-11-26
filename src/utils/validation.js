@@ -1,6 +1,7 @@
 'use strict';
 const { z } = require('zod');
 const { AppError } = require('./errors');
+const { parseCallbackUrl } = require('./callbackUrl');
 
 function normalizePhone(value) {
   let phone = String(value).trim().replace(/[ ()-]/g, '');
@@ -30,12 +31,8 @@ function parsePayment(input, config) {
   }
   const payment = { ...parsed.data, phone: normalizePhone(parsed.data.phone) };
   if (payment.callbackUrl !== undefined) {
-    let url;
-    try { url = new URL(payment.callbackUrl); } catch { throw new AppError(400, 'INVALID_CALLBACK_URL', 'Use an approved HTTPS callback URL.'); }
-    if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.href.length > 2048 ||
-        !config.callbackOrigins?.includes(url.origin)) {
-      throw new AppError(400, 'INVALID_CALLBACK_URL', 'Use an approved HTTPS callback URL without credentials or a fragment.');
-    }
+    const url = parseCallbackUrl(payment.callbackUrl);
+    if (!url) throw new AppError(400, 'INVALID_CALLBACK_URL', 'Use a public HTTPS callback URL without credentials or a fragment.');
     payment.callbackUrl = url.href;
   }
   return payment;

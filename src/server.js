@@ -24,9 +24,7 @@ async function main() {
   if (config.reconcileEnabled) {
     workers.push(startWorker(options => service.reconcileBatch(options), config.reconcilePollMs, 'reconciliation_error'));
   }
-  if (config.callbackOrigins.length) {
-    workers.push(startWorker(() => deliverCallback(repository, config), 1000, 'callback_delivery_error'));
-  }
+  workers.push(startWorker(() => deliverCallback(repository), 1000, 'callback_delivery_error'));
   let stopping = false;
   const shutdown = async () => {
     if (stopping) return;
